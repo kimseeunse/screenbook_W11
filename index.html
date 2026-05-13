@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>Book Stack · Cover · Pages · Memo</title>
+<title>Screen Book</title>
 <style>
   body { margin: 0; overflow: hidden; background: #ffffff; font-family: system-ui, sans-serif; color: #333; cursor: default; }
   body.hovering { cursor: pointer; }
@@ -30,35 +30,35 @@ import * as THREE from 'three';
 
 // ---------- scene ----------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xffffff);
-scene.fog = new THREE.Fog(0xffffff, 12, 30);
+// Black void background — pure-white pages and emissive covers pop against it,
+// which sidesteps the white-on-white differentiation problem entirely.
+scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(devicePixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+// No tone mapping: pure-white materials must stay pure white in the output.
+// ACES filmic compresses values >1.0, pushing #fff down to ~#c0 (gray).
+renderer.toneMapping = THREE.NoToneMapping;
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const key = new THREE.DirectionalLight(0xfff4e0, 1.2);
+// Black-void scene: pages are unlit pure white, the floor is unlit black,
+// so lighting only shapes the covers / spines / devices. Bumped up from the
+// previous white-bg setup since we no longer need to keep the floor in the
+// non-clipping range — stronger ambient gives richer cover saturation, key
+// provides directional shading for visible volume.
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 0.55);
 key.position.set(3, 7, 4);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0xd6e0ff, 0.55);
-fill.position.set(-4, 4, -3);
-scene.add(fill);
-const rim = new THREE.DirectionalLight(0xffffff, 0.4);
-rim.position.set(0, 2, -6);
-scene.add(rim);
-const under = new THREE.DirectionalLight(0xffffff, 0.25);
-under.position.set(0, -2, 2);
-scene.add(under);
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(100, 100),
-  new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 })
+  // Floor matches the void background — invisible but still receives the book
+  // so positions and shadows (if added later) have something to land on.
+  new THREE.MeshBasicMaterial({ color: 0x000000 })
 );
 floor.rotation.x = -Math.PI/2;
 floor.position.y = -0.002;
@@ -86,9 +86,20 @@ const palettes = [
 
 function makeBook(w, h, t, [coverHex, spineHex]) {
   const geo = new THREE.BoxGeometry(w, t, h);
-  const pages = new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, transparent: true });
-  const cover = new THREE.MeshStandardMaterial({ color: coverHex, roughness: 0.5,  transparent: true });
-  const spine = new THREE.MeshStandardMaterial({ color: spineHex, roughness: 0.45, transparent: true });
+  // Pages = unlit pure white. PBR shading on white plus our directional key
+  // washed the page-edge faces into gray; basic material keeps them clean.
+  const pages = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+  // Emissive = the cover's own hex at ~35% so colors stay punchy even under the
+  // subdued ambient/key lighting that keeps the floor a soft off-white. Without
+  // this, vivid hues like crimson and royalblue read muted against pure-white pages.
+  const cover = new THREE.MeshStandardMaterial({
+    color: coverHex, roughness: 0.5, transparent: true,
+    emissive: coverHex, emissiveIntensity: 0.35,
+  });
+  const spine = new THREE.MeshStandardMaterial({
+    color: spineHex, roughness: 0.45, transparent: true,
+    emissive: spineHex, emissiveIntensity: 0.20,
+  });
   const mats = [pages, spine, cover, cover, pages, pages];
   const mesh = new THREE.Mesh(geo, mats);
   mesh.userData = { w, h, t, uniqueMats: [pages, cover, spine], coverHex, spineHex, type: 'book' };
@@ -407,8 +418,8 @@ const pageMat = new THREE.ShaderMaterial({
     uTurn:  { value: 0 },
     uW:     { value: 1.0 },
     uR:     { value: 0.04 },
-    uFront: { value: new THREE.Color(0xf6f3eb) },
-    uBack:  { value: new THREE.Color(0xece9e1) },
+    uFront: { value: new THREE.Color(0xffffff) },
+    uBack:  { value: new THREE.Color(0xffffff) },
     uAnnotation: { value: blank.tex },
   },
   vertexShader: /* glsl */`
@@ -500,14 +511,14 @@ const underlayGeo = new THREE.PlaneGeometry(1, 1);
 underlayGeo.rotateX(-Math.PI/2);
 const underlay = new THREE.Mesh(
   underlayGeo,
-  new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, side: THREE.DoubleSide })
+  new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
 );
 underlay.visible = false;
 scene.add(underlay);
 
 // shared open-base for books: takes the closed-box's place when book is open, sized 2w × t × h
-const openTopMat    = new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, transparent: true });
-const openSideMat   = new THREE.MeshStandardMaterial({ color: 0xe5e1d6, roughness: 0.88, transparent: true });
+const openTopMat    = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+const openSideMat   = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
 const openBase = new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
   [openSideMat, openSideMat, openTopMat, openSideMat, openSideMat, openSideMat]
@@ -734,10 +745,10 @@ function setupLayersOnBook() {
     layer.visible = true;
     if (i === 0) {
       layer.material.uniforms.uFront.value.setHex(focused.userData.coverHex);
-      layer.material.uniforms.uBack.value.setHex(0xf0ede5);
+      layer.material.uniforms.uBack.value.setHex(0xffffff);
     } else {
-      layer.material.uniforms.uFront.value.setHex(0xf6f3eb);
-      layer.material.uniforms.uBack.value.setHex(0xece9e1);
+      layer.material.uniforms.uFront.value.setHex(0xffffff);
+      layer.material.uniforms.uBack.value.setHex(0xffffff);
     }
   }
 }
@@ -983,7 +994,7 @@ let hovered = null, dragging = false, dragMoved = false, lx = 0, ly = 0;
 let annotationLayer = null, annotationLastUV = null, strokeStarted = false;
 let lastAnnotated = null;
 
-function pickFirst(ev) {
+function pickFirst(ev, { annotationOnly = false } = {}) {
   pointer.x = (ev.clientX / innerWidth) * 2 - 1;
   pointer.y = -(ev.clientY / innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
@@ -992,7 +1003,16 @@ function pickFirst(ev) {
   // meant for the page layers on top of it.
   const targets = [];
   for (const b of books) if (b.visible) targets.push(b);
-  for (const l of layers) if (l.visible) targets.push(l);
+  for (const l of layers) {
+    if (!l.visible) continue;
+    // For annotation pickup, skip flipped non-cover pages: their visual
+    // position is on the left (shader-displaced) but their geometry sits
+    // in the right half, so they'd intercept strokes meant for the next
+    // right-side page and draw on the wrong UV. The cover is fine because
+    // its rotation.z actually rotates the geometry.
+    if (annotationOnly && l.userData.side === 'left' && l.userData.layerIdx !== 0) continue;
+    targets.push(l);
+  }
   const hit = raycaster.intersectObjects(targets, true)[0];
   if (!hit) return null;
   const ref = hit.object.userData?.bookRef;
@@ -1059,7 +1079,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
   dragging = true; dragMoved = false; lx = e.clientX; ly = e.clientY;
   annotationLayer = null; annotationLastUV = null; strokeStarted = false;
   if (state === 'open' || state === 'opening' || state === 'turning' || state === 'reversing' || state === 'closing') {
-    const hit = pickFirst(e);
+    const hit = pickFirst(e, { annotationOnly: true });
     if (hit && layers.includes(hit.object)) {
       annotationLayer  = hit.object;
       annotationLastUV = hit.uv.clone();
@@ -1071,7 +1091,7 @@ renderer.domElement.addEventListener('pointermove', e => {
     const dx = e.clientX - lx, dy = e.clientY - ly;
     if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved = true;
     if (dragMoved && annotationLayer) {
-      const hit = pickFirst(e);
+      const hit = pickFirst(e, { annotationOnly: true });
       if (hit && hit.object === annotationLayer) {
         if (!strokeStarted) {
           pushUndoState(annotationLayer.userData.annotation);
