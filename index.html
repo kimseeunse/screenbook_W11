@@ -416,23 +416,27 @@ const pageMat = new THREE.ShaderMaterial({
     varying vec2 vUv;
     varying vec3 vNormal;
     const float PI = 3.14159265359;
+    // Page hinges at the spine (local x=0) and rotates β = π·uTurn around it
+    // (0 = flat-right, π = flat-left). uR carries per-unit-length bend curvature
+    // K, pulsed up mid-turn so the page also arcs into a circle along the way.
+    // Position is the integral of tangent (β + K·x) along the original arc length:
+    //   pos.x = (sin(β + K·x) - sin(β)) / K
+    //   pos.y = (cos(β)       - cos(β + K·x)) / K
+    // At K → 0 this collapses cleanly to a rigid rotation by β.
     void main() {
       vec3 pos = position;
-      float F = uW * (1.0 - uTurn);
-      float s = pos.x - F;
-      vec3 n;
-      if (s <= 0.0) {
-        n = vec3(0.0, 1.0, 0.0);
-      } else if (s <= PI * uR) {
-        float th = s / uR;
-        pos.x = F + uR * sin(th);
-        pos.y = uR * (1.0 - cos(th));
-        n = vec3(-sin(th), cos(th), 0.0);
+      float x = pos.x;
+      float beta = PI * uTurn;
+      float K = uR;
+      float th = beta + K * x;
+      if (abs(K) < 1e-4) {
+        pos.x = x * cos(beta);
+        pos.y = x * sin(beta);
       } else {
-        pos.x = 2.0 * F - position.x + PI * uR;
-        pos.y = 2.0 * uR;
-        n = vec3(0.0, -1.0, 0.0);
+        pos.x = (sin(th) - sin(beta)) / K;
+        pos.y = (cos(beta) - cos(th)) / K;
       }
+      vec3 n = vec3(-sin(th), cos(th), 0.0);
       vUv = uv;
       vNormal = normalize((modelMatrix * vec4(n, 0.0)).xyz);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
@@ -465,7 +469,14 @@ let currentCoverDz = 0.012;
 let currentPageDz  = 0.005;
 const layers = [];
 
-const PAGE_R  = 0.035;   // page curl radius (in local units; flexible paper)
+// peak bend curvature K (radians per local unit length). The whole page
+// hinges at the spine and rotates β = π·uTurn; layered on top, K bends the
+// page into a circular arc. K is signed and follows sin(2π·u): positive in
+// the first half (curls "forward" with the rotation), negative in the second
+// half (curls "backward"). This keeps the fore-edge cleanly arcing in +Y the
+// whole way — without sign flip the tip dives below the surface past u=0.5.
+// π/4 keeps the bend gentle so the tip's path stays close to a semicircle.
+const PAGE_R_MAX = Math.PI / 4;
 for (let i = 0; i < N_LAYERS; i++) {
   // pages need many x-subdivisions for a smooth curl; cover stays rigid (no curl needed)
   const xSeg = (i === 0) ? 1 : 80;
@@ -475,7 +486,7 @@ for (let i = 0; i < N_LAYERS; i++) {
   const mat = pageMat.clone();
   const ann = makeCanvasTexture(384);
   mat.uniforms.uAnnotation.value = ann.tex;
-  mat.uniforms.uR.value = PAGE_R;
+  mat.uniforms.uR.value = 0;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.visible = false;
   mesh.userData = { layerIdx: i, side: 'right', annotation: ann, isCover: (i === 0) };
@@ -718,6 +729,7 @@ function setupLayersOnBook() {
     layer.position.set(-w/2, y, 2.7);
     layer.rotation.z = 0;
     layer.material.uniforms.uTurn.value = 0;
+    layer.material.uniforms.uR.value = 0;
     layer.userData.side = 'right';
     layer.visible = true;
     if (i === 0) {
@@ -759,11 +771,12 @@ function tryStartTurn() {
     layer.userData.animStartRotZ = 0;
     layer.userData.animEndRotZ   = Math.PI;
   } else {
-    // curl shader for pages; mesh.y compensates so rendered y (= mesh.y + 2R) lands on left
+    // curl shader for pages; uR pulses 0 → R_max → 0 during the turn so the page
+    // rolls visibly mid-flight and lands flat (rendered y == mesh.y) at uTurn=1.
     layer.userData.animStartUTurn = 0;
     layer.userData.animEndUTurn   = 1;
     layer.userData.animStartY = layer.position.y;
-    layer.userData.animEndY   = (leftTopY + dz) - 2 * PAGE_R;
+    layer.userData.animEndY   = leftTopY + dz;
   }
   state = 'turning';
   turningLayerIdx = target;
@@ -781,7 +794,8 @@ function finishTurn() {
     leftTopY = layer.position.y;        // rendered y == mesh.y for rigid cover
   } else {
     layer.material.uniforms.uTurn.value = 1;
-    leftTopY = layer.position.y + 2 * PAGE_R;   // rendered y == mesh.y + 2R for curled page
+    layer.material.uniforms.uR.value = 0;
+    leftTopY = layer.position.y;   // rendered y == mesh.y once R returns to 0
   }
   layer.userData.side = 'left';
 
@@ -807,11 +821,11 @@ function _clearCoverLerp() {
 
 function tryReverseTurn() {
   if (state !== 'open') return;
-  // topmost left-side PAGE (skip cover at index 0). For curled pages, rendered y = mesh.y + 2R.
+  // topmost left-side PAGE (skip cover at index 0). At rest R=0 so rendered y == mesh.y.
   let target = -1, maxRendered = -Infinity;
   for (let i = 1; i < N_LAYERS; i++) {
     if (layers[i].userData.side === 'left') {
-      const r = layers[i].position.y + 2 * PAGE_R;
+      const r = layers[i].position.y;
       if (r > maxRendered) { maxRendered = r; target = i; }
     }
   }
@@ -826,7 +840,7 @@ function tryReverseTurn() {
   }
   layer.userData.animStartUTurn = 1;
   layer.userData.animEndUTurn   = 0;
-  // mesh.y goes from current (offset by -2R from rendered) back to a flat right-stack y
+  // uR pulses 0 → R_max → 0 again as the page rolls back to the right stack.
   layer.userData.animStartY = layer.position.y;
   layer.userData.animEndY   = topRightY + currentPageDz;
   state = 'reversing';
@@ -838,15 +852,15 @@ function tryReverseTurn() {
 function finishReverseTurn() {
   const layer = layers[turningLayerIdx];
   layer.material.uniforms.uTurn.value = 0;
+  layer.material.uniforms.uR.value = 0;
   layer.position.y = layer.userData.animEndY;
   layer.userData.side = 'right';
 
-  // recompute leftTopY from remaining left layers' rendered y
+  // recompute leftTopY from remaining left layers' rendered y (R=0 at rest)
   let newLeftTop = baseTopY - 0.0005;
   for (const l of layers) {
     if (l.userData.side === 'left') {
-      const r = l.userData.isCover ? l.position.y : l.position.y + 2 * PAGE_R;
-      if (r > newLeftTop) newLeftTop = r;
+      if (l.position.y > newLeftTop) newLeftTop = l.position.y;
     }
   }
   leftTopY = newLeftTop;
@@ -865,6 +879,7 @@ function startClosing() {
   for (let i = 1; i < N_LAYERS; i++) {
     if (layers[i].userData.side === 'left') {
       layers[i].material.uniforms.uTurn.value = 0;
+      layers[i].material.uniforms.uR.value = 0;
       layers[i].userData.side = 'right';
     }
   }
@@ -897,6 +912,7 @@ function hideLayers() {
     l.visible = false;
     l.rotation.z = 0;
     l.material.uniforms.uTurn.value = 0;
+    l.material.uniforms.uR.value = 0;
     l.userData.side = 'right';
   }
   underlay.visible = false;
@@ -984,7 +1000,8 @@ function pickFirst(ev) {
   return hit;
 }
 
-function handleClick(obj) {
+function handleClick(hit) {
+  const obj = hit?.object || null;
   if (state === 'laying' || state === 'opening' || state === 'turning' ||
       state === 'reversing' || state === 'closing' || state === 'macbook-opening') return;
 
@@ -1004,14 +1021,20 @@ function handleClick(obj) {
       closeAndReturn();
     }
   } else if (state === 'open') {
+    // Route by click world x vs spine x, NOT by which layer raycast hit.
+    // Pages are displaced visually by the curl shader but their geometry stays
+    // at the original right-side x range, so a click on the right half always
+    // hits some layer regardless of whether that layer is currently 'right' or
+    // 'left'. Spine sits at layer mesh origin: world x = -w/2 of focused book.
     if (obj && layers.includes(obj)) {
-      if (obj.userData.side === 'right') {
-        tryStartTurn();
-      } else if (obj.userData.layerIdx === 0) {
-        // back of front cover (endpaper) clicked → close the book
+      const spineX = focused ? -focused.userData.w / 2 : 0;
+      const clickX = hit?.point?.x ?? 0;
+      if (obj.userData.layerIdx === 0 && clickX < spineX) {
+        // flipped front cover clicked from the left → close the book
         startClosing();
+      } else if (clickX > spineX) {
+        tryStartTurn();
       } else {
-        // left-side page → reverse to previous
         tryReverseTurn();
       }
     } else if (obj && books.includes(obj) && obj !== focused) {
@@ -1078,7 +1101,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   }
 });
 renderer.domElement.addEventListener('pointerup', e => {
-  if (e.button === 0 && dragging && !dragMoved) handleClick(pickFirst(e)?.object || null);
+  if (e.button === 0 && dragging && !dragMoved) handleClick(pickFirst(e));
   dragging = false;
   annotationLayer = null;
   annotationLastUV = null;
@@ -1132,7 +1155,12 @@ function animate() {
       layer.rotation.z = layer.userData.animStartRotZ + (layer.userData.animEndRotZ - layer.userData.animStartRotZ) * e;
     }
     if (layer.userData.animStartUTurn !== undefined) {
-      layer.material.uniforms.uTurn.value = layer.userData.animStartUTurn + (layer.userData.animEndUTurn - layer.userData.animStartUTurn) * e;
+      const u = layer.userData.animStartUTurn + (layer.userData.animEndUTurn - layer.userData.animStartUTurn) * e;
+      layer.material.uniforms.uTurn.value = u;
+      // K = K_max · sin(2π·u). Goes 0 → +K_max → 0 → −K_max → 0 across the turn,
+      // flipping the bend direction at u=0.5 so the fore-edge stays in +Y the
+      // whole way (tip traces a clean arc from (1,0) up through (0,1) to (−1,0)).
+      layer.material.uniforms.uR.value = PAGE_R_MAX * Math.sin(2 * Math.PI * u);
     }
     if (layer.userData.animStartY !== undefined) {
       layer.position.y = layer.userData.animStartY + (layer.userData.animEndY - layer.userData.animStartY) * e;
