@@ -2,8 +2,1183 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=./book-stack.html">
-<title>screenbook</title>
+<title>Book Stack · Cover · Pages · Memo</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #ffffff; font-family: system-ui, sans-serif; color: #333; cursor: default; }
+  body.hovering { cursor: pointer; }
+  body.drawable { cursor: crosshair; }
+  #panel {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(255,255,255,0.85); border: 1px solid rgba(0,0,0,0.08);
+    padding: 10px 14px; border-radius: 6px;
+    font-size: 13px; line-height: 1.7; pointer-events: none;
+    max-width: 420px; color: #333;
+  }
+  kbd { background: #eee; color: #333; padding: 1px 6px; border-radius: 3px; font: 12px ui-monospace, monospace; }
+  #hint { opacity: .7; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 3px; background: #e6ecec; color: #2a5a5a; font-size: 11px; }
+  .small { opacity: .55; font-size: 12px; }
+</style>
 </head>
-<body><a href="./book-stack.html">screenbook</a></body>
+<body>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffffff);
+scene.fog = new THREE.Fog(0xffffff, 12, 30);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const key = new THREE.DirectionalLight(0xfff4e0, 1.2);
+key.position.set(3, 7, 4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xd6e0ff, 0.55);
+fill.position.set(-4, 4, -3);
+scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.4);
+rim.position.set(0, 2, -6);
+scene.add(rim);
+const under = new THREE.DirectionalLight(0xffffff, 0.25);
+under.position.set(0, -2, 2);
+scene.add(under);
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(100, 100),
+  new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 })
+);
+floor.rotation.x = -Math.PI/2;
+floor.position.y = -0.002;
+scene.add(floor);
+
+// ---------- seeded rng ----------
+function rng(seed) { let s = seed>>>0; return () => (s = (s*1664525 + 1013904223) >>> 0)/0xffffffff; }
+const rand = rng(7);
+
+// ---------- vivid book covers (CSS named) ----------
+const palettes = [
+  [0xDC143C, 0x8B0000], // crimson         / darkred
+  [0x4169E1, 0x000080], // royalblue       / navy
+  [0x228B22, 0x006400], // forestgreen     / darkgreen
+  [0xFF8C00, 0xD2691E], // darkorange      / chocolate
+  [0xC71585, 0x800080], // mediumvioletred / purple
+  [0x00CED1, 0x008080], // darkturquoise   / teal
+  [0xFFD700, 0xB8860B], // gold            / darkgoldenrod
+  [0xFF6347, 0xB22222], // tomato          / firebrick
+  [0x3CB371, 0x2E8B57], // mediumseagreen  / seagreen
+  [0x7B68EE, 0x483D8B], // mediumslateblue / darkslateblue
+  [0xFF1493, 0xC71585], // deeppink        / mediumvioletred
+  [0x9400D3, 0x4B0082], // darkviolet      / indigo
+];
+
+function makeBook(w, h, t, [coverHex, spineHex]) {
+  const geo = new THREE.BoxGeometry(w, t, h);
+  const pages = new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, transparent: true });
+  const cover = new THREE.MeshStandardMaterial({ color: coverHex, roughness: 0.5,  transparent: true });
+  const spine = new THREE.MeshStandardMaterial({ color: spineHex, roughness: 0.45, transparent: true });
+  const mats = [pages, spine, cover, cover, pages, pages];
+  const mesh = new THREE.Mesh(geo, mats);
+  mesh.userData = { w, h, t, uniqueMats: [pages, cover, spine], coverHex, spineHex, type: 'book' };
+  mesh.userData.bookRef = mesh;
+  return mesh;
+}
+
+// ---------- device helpers ----------
+const MACBOOK_TEXT = `기존 주제에서 조금 더 구체적으로 범위를 좁혀서 100을 진행하려고 합니다.
+
+100프로젝트가 졸전 주제와 이어지기 때문에 큰 범위로 가져가도 괜찮겠다고 생각해서, 스크린 속 세계의 시공간을 현상학적으로 해석—비물리적인 스크린 세계 속에서 일어나는 일들, 관계, 감각에 대한 해석을 해보려고 했는데, 주제가 너무 커서 초점이 제대로 안맞춰지고 횡설수설 말이 길어지더라고요.
+
+우리가 발 딛고 느끼는 현실세계에서는 오감이 모두 작용하지만, 스크린 세계에서는 시각과 화면을 매끄럽게 만지는 촉각성만이 남고 사람들의 경험지식과 지성을 활용하기 때문에 스크린이 창이되어 스크린 속에서도 현실세계를 재현하는 방법으로 감각하게 됩니다.
+
+아직까지 이 시대의 사람들은 현실세계의 감각방법이 스크린 속 감각방법보다는 익숙하기 때문입니다. 스크린이라는 물리적 장치를 벗어나는 세대가 온다면 이는 조금 더 달라질 수 있는 이야기라고는 생각하지만, 아직 도래하지 않은 미래에 대해서 구체적으로 상상하는 것이 어렵더라고요.
+
+그래서 구체적이고 실질적인 지식의 체득과 탐구를 위해 / 기존에 정리되지 않던 전자출판에 대한 생각을 명료화할지 고민하기위해, 어떻게 전자출판에 대한 생각을 전개해나갈건지 생각해보았습니다.
+
+1. 종이책의 물성에 대한 생각
+1-1. 책의 부피감 — 읽기 전부터 몸에 닿아 내용의 규모를 알아차릴 수 있게 해준다. → 책의 촉각성
+1-2. 책의 훑어보기 — 본격적 독서가 시작되기 전 책의 내용과 분위기에 대해서 훑어볼 수 있게 해준다.
+1-3. 제본방식에 따라 읽히는 방법이 많이 달라진다.
+1-4. 종이책은 햇빛에 닿고, 상황에 따라 다른 정서를 자아낸다.
+1-5. 우리는 종이책을 펼쳐놓기 위해서 힘을 줘야한다. ⇔ 책을 넘기는 행위, 독자가 책과 맺는 물리적 관계
+1-6. 물리적으로 손상이 있을 수 있지만, 책이 불태워지거나 파쇄되기 전까지의 기록성이 강하다.
+
+2. 종이의 물성에 대한 생각
+2-1. 종이는 접을 수 있다.
+2-2. 종이에는 메모할 수 있다.
+2-3. 종이에는 질감이 있다. 상황마다 다르겠지만, 이러한 질감은 책의 완결성에서 중요한 요소로 작용한다. → 종이의 촉각성
+2-4. 손에 닿고, 읽히면서 닳는다.
+2-5. 종이에 쓰인 글은 잘 읽힌다. 왜? → 책은 굉장히 오랜 세월 쌓여온 제작기술과 경험이 녹아들어있다. 반면, 전자출판은 종이책 5000년의 역사를 따라잡기에는 그 역사가 짧다.
+
+3. 스크린의 물성에 대한 생각
+3-1. 스크린의 빛은 종이의 반사광과 다른 방식으로 눈에 들어온다. 그 자체로 발광하면서 모습과 내용을 드러낸다.
+3-2. 스크린 액정은 미끌미끌하다. (대상)-(액정)-(감상자) 액정은 모든 대상을 평평한 층을 거쳐 보여준다. 그래서 대상을 더 평평하게 느껴지게끔 한다.
+3-3. 스크린의 정지 이미지는 정지의 외관을 가질 뿐, 존재론적으로는 정지가 아니다. 그것은 지속적 재현의 결과물이며, 이미지의 영속성은 매순간의 재생성에 의존한다. → 주사율
+
+4. 전자출판의 한계에 대한 생각
+4-1. 물리적 책의 촉각은 시각적 효과만으로 완전히 대체될 수 없다.
+4-2. 우연히 발생하는 발견과 탐색에서 약하다. → 스크린의 공간성이 실제 세계보다 약하다.
+4-3. 지금까지 전자책이 종이책만큼 잘 읽히기 위한 방법들을 고안해냈지만, 한계가 있다.
+4-4. 전자출판은 전원, 기기, 파일 형식, 서버에 의존한다. 책의 연속성과 영속성에 대한 문제를 가지고 있다.
+4-5. 전자책장에서의 전자표지는 실제 책장에서 종이 책등만큼의 위압감, 무게, 뿌듯함을 주지 못한다.
+
+5. 새로운 매체로서 전자출판의 가능성
+5-1. 전자책은 스크린만의 문법을 가질 수 있다. ex) 소리와 움직임을 페이지에 넣는 것이 가능하다. / 자유롭게 확대와 축소가 가능하다.
+5-2. 전자출판은 책을 고정된 사물이 아니라, 변화하는 환경으로 만들 수 있다.
+5-3. 디지털공간의 책은 기존의 종이책보다 열린 공간이 될 수 있다.
+5-4. 별색인쇄를 하지 않아도, 종이책보다 더 다양한 색공간을 사용할 수 있다.
+5-5. 지속적으로 업데이트가 가능하다.
+5-6. 질량적 측면에서 종이책보다 가볍다.
+5-7. 인쇄, 제본, 물류 비용을 줄이며 더 낮은 비용으로 배포될 수 있다.
+5-8. 전자출판은 종이, 제본, 인쇄 방식의 한계를 벗어나 극단적인 재질감과 형식을 시뮬레이션할 수 있다.
+
+6. 아트북으로서의 전자출판에 대한 생각
+6-1. 아트북은 내용도 내용이지만, 형식 자체도 내용이 되는 매체다.
+6-2. 파일로서의 아트북이 현실세계에서 아트북을 느끼고 해석하는 감각과 비슷한 느낌을 줄 수 있을까?
+6-3. 전자 아트북은 종이책의 복제본이 아니라, 스크린 화면을 목적으로 다시 설계되어야 한다.
+
+7. 행위에 대한 생각
+7-1. 읽기의 자세. 종이책은 책의 형태에 따라 읽는 사람의 자세가 크게 바뀐다.
+7-2. 빌려주기 / 같은 사물
+7-3. 선물하기 / 선물의 방식, 선물의 형태, 선물을 주는 사람의 기록
+7-4. 함께 읽기. 종이책을 둘이 같이 들여다보기, 스크린을 둘이 보기. 종이책의 시야각과 스크린의 시야각.
+
+저는 그래서 100프로젝트에서 종이책과 스크린이라는 두 매체의 차이를 관찰하고, 그 관찰과 생각들을 풀어내는 웹 작업을 진행할 예정입니다. 100개의 관찰과 실험은 단순한 텍스트 모음에서 그치는 것이 아니라, 전자출판이 어떻게 작동할 수 있는지 보여주는 방식으로 구성됩니다. 전자출판에 대한 사유가 전자출판의 형식 안에서 수행되며, 종이책의 감각에 덧붙여 스크린 안에서 가능한 방식으로 전자출판의 감각을 새롭게 구성하는 것이 이번 프로젝트 목표입니다.`;
+
+function makeScrollableScreen(text, cw = 1024) {
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  let ctx = canvas.getContext('2d');
+  ctx.font = '20px system-ui, -apple-system, sans-serif';
+  const pad = 56, maxW = cw - 2*pad, lineH = 30;
+
+  const lines = [];
+  let yEst = pad;
+  for (const para of text.split('\n')) {
+    if (para.trim() === '') { lines.push(null); yEst += lineH * 0.55; continue; }
+    let line = '';
+    for (const ch of para) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line); yEst += lineH; line = ch;
+      } else line = test;
+    }
+    if (line) { lines.push(line); yEst += lineH; }
+    lines.push(null); yEst += lineH * 0.35;
+  }
+  canvas.height = Math.max(yEst + pad, 2000);
+
+  ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fafaf9';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = '20px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#1a1a1a';
+  ctx.textBaseline = 'top';
+
+  let y = pad;
+  for (const ln of lines) {
+    if (ln === null) { y += lineH * 0.55; continue; }
+    ctx.fillText(ln, pad, y);
+    y += lineH;
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  return { canvas, tex };
+}
+
+function makeStaticScreen(text, aspect, fontSize = 18, bg = '#fafaf9', fg = '#1a1a1a') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = Math.round(1024 / aspect);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
+  ctx.fillStyle = fg;
+  ctx.textBaseline = 'top';
+  const pad = Math.round(fontSize * 1.8);
+  const maxW = canvas.width - 2*pad;
+  const lineH = fontSize * 1.42;
+  let y = pad;
+  outer: for (const para of text.split('\n')) {
+    if (para.trim() === '') { y += lineH * 0.55; continue; }
+    let line = '';
+    for (const ch of para) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line) {
+        if (y > canvas.height - pad - lineH) break outer;
+        ctx.fillText(line, pad, y); y += lineH; line = ch;
+      } else line = test;
+    }
+    if (line && y < canvas.height - pad) {
+      ctx.fillText(line, pad, y); y += lineH;
+    }
+    y += lineH * 0.35;
+    if (y > canvas.height - pad) break;
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { canvas, tex };
+}
+
+function makeIpad() {
+  const group = new THREE.Group();
+  const W = 1.6, H = 1.2, T = 0.05;
+  const bodyMat  = new THREE.MeshStandardMaterial({ color: 0xc6c6ca, roughness: 0.32, transparent: true });
+  const bezelMat = new THREE.MeshStandardMaterial({ color: 0x0c0c10, roughness: 0.55, transparent: true });
+  const screenContent = makeStaticScreen(MACBOOK_TEXT, (W*0.88)/(H*0.84), 22);
+  const screenMat = new THREE.MeshBasicMaterial({ map: screenContent.tex, transparent: true });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, T, H), [bodyMat, bodyMat, bezelMat, bodyMat, bodyMat, bodyMat]);
+  body.userData.bookRef = group; group.add(body);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(W*0.88, H*0.84), screenMat);
+  screen.rotation.x = -Math.PI/2; screen.position.y = T/2 + 0.0005;
+  screen.userData.bookRef = group; group.add(screen);
+  group.userData = { w: W, h: H, t: T, type: 'ipad', uniqueMats: [bodyMat, bezelMat, screenMat], tiltY: 0, offX: 0, offZ: 0, bookRef: group };
+  return group;
+}
+
+function makePhone() {
+  const group = new THREE.Group();
+  const W = 0.78, H = 1.55, T = 0.04;
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 0.42, transparent: true });
+  const screenContent = makeStaticScreen(MACBOOK_TEXT, (W*0.93)/(H*0.95), 16);
+  const screenMat = new THREE.MeshBasicMaterial({ map: screenContent.tex, transparent: true });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, T, H), [bodyMat, bodyMat, bodyMat, bodyMat, bodyMat, bodyMat]);
+  body.userData.bookRef = group; group.add(body);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(W*0.93, H*0.95), screenMat);
+  screen.rotation.x = -Math.PI/2; screen.position.y = T/2 + 0.0005;
+  screen.userData.bookRef = group; group.add(screen);
+  group.userData = { w: W, h: H, t: T, type: 'phone', uniqueMats: [bodyMat, screenMat], tiltY: 0, offX: 0, offZ: 0, bookRef: group };
+  return group;
+}
+
+function makeMacbook() {
+  const group = new THREE.Group();
+  const W = 1.95, H = 1.32, baseT = 0.08, screenT = 0.04;
+  const totalT = baseT + screenT;
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc4c4c8, roughness: 0.34, transparent: true });
+  const keyboardMat = new THREE.MeshStandardMaterial({ color: 0x18181c, roughness: 0.6, transparent: true });
+  const lidMat = new THREE.MeshStandardMaterial({ color: 0xbcbcc0, roughness: 0.38, transparent: true });
+  const bezelMat = new THREE.MeshStandardMaterial({ color: 0x080810, roughness: 0.5, transparent: true });
+
+  const baseMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(W, baseT, H),
+    [bodyMat, bodyMat, keyboardMat, bodyMat, bodyMat, bodyMat]
+  );
+  baseMesh.position.y = -screenT/2;     // device center is in the middle of total thickness
+  baseMesh.userData.bookRef = group; group.add(baseMesh);
+
+  // hinge axis at back-top of base
+  const hinge = new THREE.Group();
+  hinge.position.set(0, (baseT - screenT)/2, -H/2);
+  group.add(hinge);
+
+  // screen lid: +y face is the outer lid (silver), -y face is bezel (display side)
+  const screenMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(W, screenT, H),
+    [lidMat, lidMat, lidMat, bezelMat, lidMat, lidMat]
+  );
+  screenMesh.position.set(0, screenT/2, H/2);
+  screenMesh.userData.bookRef = group; hinge.add(screenMesh);
+
+  // text content plane on the display (-y of screen)
+  const screenContent = makeScrollableScreen(MACBOOK_TEXT);
+  const contentMat = new THREE.MeshBasicMaterial({ map: screenContent.tex, transparent: true });
+  const contentPlane = new THREE.Mesh(new THREE.PlaneGeometry(W*0.9, H*0.83), contentMat);
+  contentPlane.rotation.x = Math.PI/2;     // face -y
+  contentPlane.position.set(0, -0.0005, H/2);
+  contentPlane.userData.bookRef = group; hinge.add(contentPlane);
+
+  // configure texture aspect for visible window
+  const planeAspect = (W*0.9) / (H*0.83);
+  const visibleH = screenContent.canvas.width / planeAspect;
+  const repeatY = Math.min(1, visibleH / screenContent.canvas.height);
+  screenContent.tex.repeat.set(1, repeatY);
+  screenContent.tex.offset.set(0, 1 - repeatY);   // show top of canvas first
+
+  group.userData = {
+    w: W, h: H, t: totalT,
+    type: 'macbook',
+    hinge, contentPlane, screenContent,
+    uniqueMats: [bodyMat, keyboardMat, lidMat, bezelMat, contentMat],
+    tiltY: 0, offX: 0, offZ: 0,
+    bookRef: group,
+  };
+  return group;
+}
+
+const BOOK_COUNT = palettes.length;
+const books = [];
+const order = [...palettes.keys()].sort(() => rand() - 0.5);
+for (let i = 0; i < BOOK_COUNT; i++) {
+  const w = 1.3 + rand()*0.5;
+  const h = 1.7 + rand()*0.55;
+  const t = 0.10 + rand()*0.20;
+  const b = makeBook(w, h, t, palettes[order[i]]);
+  b.userData.tiltY = (rand()-0.5)*0.14;
+  b.userData.offX  = (rand()-0.5)*0.07;
+  b.userData.offZ  = (rand()-0.5)*0.07;
+  scene.add(b);
+  books.push(b);
+}
+
+// devices interleaved into the stack
+const ipad = makeIpad();
+ipad.userData.tiltY = (rand()-0.5)*0.10;
+ipad.userData.offX  = (rand()-0.5)*0.05;
+ipad.userData.offZ  = (rand()-0.5)*0.05;
+scene.add(ipad);
+
+const phone = makePhone();
+phone.userData.tiltY = (rand()-0.5)*0.18;
+phone.userData.offX  = (rand()-0.5)*0.08;
+phone.userData.offZ  = (rand()-0.5)*0.08;
+scene.add(phone);
+
+const macbook = makeMacbook();
+macbook.userData.tiltY = (rand()-0.5)*0.06;
+macbook.userData.offX  = (rand()-0.5)*0.04;
+macbook.userData.offZ  = (rand()-0.5)*0.04;
+scene.add(macbook);
+
+// scatter devices into the stack at distinct positions (not adjacent)
+books.splice(3,  0, macbook);
+books.splice(7,  0, ipad);
+books.splice(11, 0, phone);
+
+let stack = [...books];
+function layoutStack() {
+  let y = 0;
+  for (const b of stack) {
+    b.userData.targetPos = new THREE.Vector3(b.userData.offX, y + b.userData.t/2, b.userData.offZ);
+    b.userData.targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, b.userData.tiltY, 0));
+    b.userData.targetOpacity = 1.0;
+    y += b.userData.t + 0.004;
+  }
+}
+layoutStack();
+for (const b of books) { b.position.copy(b.userData.targetPos); b.quaternion.copy(b.userData.targetQuat); }
+
+// ---------- annotation canvas helper ----------
+function makeCanvasTexture(size = 256) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.flipY = true;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { canvas, ctx, tex, history: [] };
+}
+
+const UNDO_LIMIT = 30;
+function pushUndoState(ann) {
+  const data = ann.ctx.getImageData(0, 0, ann.canvas.width, ann.canvas.height);
+  ann.history.push(data);
+  if (ann.history.length > UNDO_LIMIT) ann.history.shift();
+}
+function popUndoState(ann) {
+  if (!ann || ann.history.length === 0) return false;
+  const data = ann.history.pop();
+  ann.ctx.putImageData(data, 0, 0);
+  ann.tex.needsUpdate = true;
+  return true;
+}
+const blank = makeCanvasTexture(1);   // prototype uniform value before per-layer clone
+
+// ---------- page shader (cloned per layer; annotation sampled in fragment) ----------
+const pageMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: {
+    uTurn:  { value: 0 },
+    uW:     { value: 1.0 },
+    uR:     { value: 0.04 },
+    uFront: { value: new THREE.Color(0xf6f3eb) },
+    uBack:  { value: new THREE.Color(0xece9e1) },
+    uAnnotation: { value: blank.tex },
+  },
+  vertexShader: /* glsl */`
+    uniform float uTurn, uW, uR;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    const float PI = 3.14159265359;
+    void main() {
+      vec3 pos = position;
+      float F = uW * (1.0 - uTurn);
+      float s = pos.x - F;
+      vec3 n;
+      if (s <= 0.0) {
+        n = vec3(0.0, 1.0, 0.0);
+      } else if (s <= PI * uR) {
+        float th = s / uR;
+        pos.x = F + uR * sin(th);
+        pos.y = uR * (1.0 - cos(th));
+        n = vec3(-sin(th), cos(th), 0.0);
+      } else {
+        pos.x = 2.0 * F - position.x + PI * uR;
+        pos.y = 2.0 * uR;
+        n = vec3(0.0, -1.0, 0.0);
+      }
+      vUv = uv;
+      vNormal = normalize((modelMatrix * vec4(n, 0.0)).xyz);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform vec3 uFront, uBack;
+    uniform sampler2D uAnnotation;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    void main() {
+      vec3 n = normalize(vNormal);
+      if (!gl_FrontFacing) n = -n;
+      vec3 L = normalize(vec3(0.4, 1.0, 0.5));
+      float diff = max(dot(n, L), 0.0);
+      vec3 base = gl_FrontFacing ? uFront : uBack;
+      vec4 ann = texture2D(uAnnotation, vUv);
+      base = mix(base, ann.rgb, ann.a);
+      gl_FragColor = vec4(base * (0.55 + diff * 0.6), 1.0);
+    }
+  `,
+});
+
+// ---------- layers (cover + N pages) ----------
+const PAGE_COUNT = 14;
+const N_LAYERS   = PAGE_COUNT + 1;
+// per-book DZs computed dynamically from the book's spine thickness so
+// "stack of pages when open" == "spine thickness when closed"
+let currentCoverDz = 0.012;
+let currentPageDz  = 0.005;
+const layers = [];
+
+const PAGE_R  = 0.035;   // page curl radius (in local units; flexible paper)
+for (let i = 0; i < N_LAYERS; i++) {
+  // pages need many x-subdivisions for a smooth curl; cover stays rigid (no curl needed)
+  const xSeg = (i === 0) ? 1 : 80;
+  const geo = new THREE.PlaneGeometry(1.0, 1.0, xSeg, 1);
+  geo.rotateX(-Math.PI/2);
+  geo.translate(0.5, 0, 0);
+  const mat = pageMat.clone();
+  const ann = makeCanvasTexture(384);
+  mat.uniforms.uAnnotation.value = ann.tex;
+  mat.uniforms.uR.value = PAGE_R;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false;
+  mesh.userData = { layerIdx: i, side: 'right', annotation: ann, isCover: (i === 0) };
+  // use Three.js default raycast for all layers (works on flat planes and rotated covers)
+  layers.push(mesh);
+  scene.add(mesh);
+}
+
+// underlay covering the book top so the πR gap of the flipped cover doesn't reveal box color
+const underlayGeo = new THREE.PlaneGeometry(1, 1);
+underlayGeo.rotateX(-Math.PI/2);
+const underlay = new THREE.Mesh(
+  underlayGeo,
+  new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, side: THREE.DoubleSide })
+);
+underlay.visible = false;
+scene.add(underlay);
+
+// shared open-base for books: takes the closed-box's place when book is open, sized 2w × t × h
+const openTopMat    = new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.92, transparent: true });
+const openSideMat   = new THREE.MeshStandardMaterial({ color: 0xe5e1d6, roughness: 0.88, transparent: true });
+const openBase = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  [openSideMat, openSideMat, openTopMat, openSideMat, openSideMat, openSideMat]
+);
+openBase.visible = false;
+scene.add(openBase);
+
+// visible spine binding — wraps the left side of the page block, color = book's spineHex
+const spineMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.55, transparent: true });
+const spine = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), spineMat);
+spine.visible = false;
+scene.add(spine);
+
+// ---------- analytical raycaster for curled pages ----------
+const _invM = new THREE.Matrix4();
+const _m3   = new THREE.Matrix3();
+const _localOrigin = new THREE.Vector3();
+const _localDir    = new THREE.Vector3();
+
+function raycastDeformedPage(layer, raycaster, intersects) {
+  _invM.copy(layer.matrixWorld).invert();
+  _localOrigin.copy(raycaster.ray.origin).applyMatrix4(_invM);
+  _m3.setFromMatrix4(_invM);
+  _localDir.copy(raycaster.ray.direction).applyMatrix3(_m3);
+
+  const W = layer.material.uniforms.uW.value;
+  const R = layer.material.uniforms.uR.value;
+  const F = W * (1.0 - layer.material.uniforms.uTurn.value);
+
+  let best = null;
+  function tryHit(localX, localY, localZ, x_orig) {
+    if (x_orig < 0 || x_orig > W) return;
+    if (localZ < -0.5 || localZ > 0.5) return;
+    const u = x_orig / W;
+    const v = 0.5 - localZ;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return;
+    const wp = new THREE.Vector3(localX, localY, localZ).applyMatrix4(layer.matrixWorld);
+    const d = wp.distanceTo(raycaster.ray.origin);
+    if (!best || d < best.distance) {
+      best = { distance: d, point: wp, uv: new THREE.Vector2(u, v), object: layer };
+    }
+  }
+  if (Math.abs(_localDir.y) > 1e-9) {
+    const t = -_localOrigin.y / _localDir.y;
+    if (t > 0) {
+      const px = _localOrigin.x + t*_localDir.x;
+      const pz = _localOrigin.z + t*_localDir.z;
+      if (px >= 0 && px <= F) tryHit(px, 0, pz, px);
+    }
+  }
+  {
+    const a = _localOrigin.x - F;
+    const b = _localOrigin.y - R;
+    const dx = _localDir.x, dy = _localDir.y;
+    const A = dx*dx + dy*dy;
+    if (A > 1e-14) {
+      const B = 2 * (a*dx + b*dy);
+      const C = a*a + b*b - R*R;
+      const disc = B*B - 4*A*C;
+      if (disc >= 0) {
+        const sd = Math.sqrt(disc);
+        for (const t of [(-B - sd) / (2*A), (-B + sd) / (2*A)]) {
+          if (t > 0) {
+            const px = _localOrigin.x + t*dx;
+            const py = _localOrigin.y + t*dy;
+            const pz = _localOrigin.z + t*_localDir.z;
+            const sinT = (px - F) / R;
+            const cosT = (R - py) / R;
+            if (sinT >= 0) {
+              const th = Math.atan2(sinT, cosT);
+              if (th >= 0 && th <= Math.PI) tryHit(px, py, pz, F + R*th);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (Math.abs(_localDir.y) > 1e-9) {
+    const t = (2*R - _localOrigin.y) / _localDir.y;
+    if (t > 0) {
+      const px = _localOrigin.x + t*_localDir.x;
+      const pz = _localOrigin.z + t*_localDir.z;
+      const xMin = 2*F - W + Math.PI*R;
+      if (px >= xMin && px <= F) tryHit(px, 2*R, pz, 2*F - px + Math.PI*R);
+    }
+  }
+  if (best) intersects.push(best);
+}
+
+// ---------- annotation drawing ----------
+function drawStroke(ann, fromUV, toUV) {
+  const { ctx, tex, canvas } = ann;
+  const sz = canvas.width;
+  ctx.strokeStyle = '#2a2a2a';
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(fromUV.x * sz, (1 - fromUV.y) * sz);
+  ctx.lineTo(toUV.x   * sz, (1 - toUV.y)   * sz);
+  ctx.stroke();
+  tex.needsUpdate = true;
+}
+
+function clearAllAnnotations() {
+  for (const l of layers) {
+    const a = l.userData.annotation;
+    a.ctx.clearRect(0, 0, a.canvas.width, a.canvas.height);
+    a.tex.needsUpdate = true;
+    a.history.length = 0;
+  }
+}
+
+// ---------- state machine ----------
+let state = 'stack';                    // stack | focused | laying | opening | open | turning
+let focused = null;
+let layingT0 = 0, turnT0 = 0;
+let turningLayerIdx = -1;
+let baseTopY = 0, leftTopY = 0;
+const LAYING_DURATION = 0.65;
+const TURN_DURATION   = 1.0;
+const COVER_DURATION  = 2.2;
+
+const STACK_VIEW   = { theta: -0.55, phi: 1.15, radius: 6.5, target: new THREE.Vector3(0, 1.3, 0) };
+const FOCUS_VIEW   = { theta:  0.00, phi: 1.40, radius: 4.2, target: new THREE.Vector3(0, 1.6, 2.6) };
+const OPEN_VIEW    = { theta: -0.15, phi: 1.00, radius: 6.0, target: new THREE.Vector3(0, 1.2, 2.7) };
+const MACBOOK_VIEW = { theta:  0.00, phi: 1.00, radius: 4.6, target: new THREE.Vector3(0, 1.45, 2.3) };
+
+const MACBOOK_DURATION = 2.0;
+const MACBOOK_OPEN_ANGLE = -3 * Math.PI / 4;   // 135°
+let macbookT0 = 0;
+
+let camTheta = STACK_VIEW.theta, camPhi = STACK_VIEW.phi, camRadius = STACK_VIEW.radius;
+let camTarget = STACK_VIEW.target.clone();
+const camGoal = { theta: camTheta, phi: camPhi, radius: camRadius, target: camTarget.clone() };
+let camLerping = false;
+
+function applyCam() {
+  camera.position.set(
+    camTarget.x + camRadius * Math.sin(camPhi) * Math.sin(camTheta),
+    camTarget.y + camRadius * Math.cos(camPhi),
+    camTarget.z + camRadius * Math.sin(camPhi) * Math.cos(camTheta),
+  );
+  camera.lookAt(camTarget);
+}
+applyCam();
+
+function setCamGoal(v) {
+  camGoal.theta = v.theta; camGoal.phi = v.phi; camGoal.radius = v.radius;
+  camGoal.target.copy(v.target);
+  camLerping = true;
+}
+
+// ---------- transitions ----------
+function focusBook(book) {
+  if (focused && focused !== book) { focused.visible = true; stack.push(focused); }
+  focused = book;
+  book.visible = true;
+  const i = stack.indexOf(book);
+  if (i >= 0) stack.splice(i, 1);
+  layoutStack();
+
+  const standUp  = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI/2, 0, 0));
+  const sideTurn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), -0.18);
+  book.userData.targetPos  = new THREE.Vector3(0, 1.6, 2.6);
+  book.userData.targetQuat = sideTurn.clone().multiply(standUp);
+  book.userData.targetOpacity = 1.0;
+  for (const b of stack) b.userData.targetOpacity = 1.0;
+
+  hideLayers();
+  clearAllAnnotations();
+
+  setCamGoal(FOCUS_VIEW);
+  state = 'focused';
+  updateHint();
+}
+
+function startOpening() {
+  if (state !== 'focused' || !focused) return;
+  focused.userData.targetPos  = new THREE.Vector3(0, 1.0, 2.8);
+  focused.userData.targetQuat = new THREE.Quaternion();
+  setCamGoal(OPEN_VIEW);
+  state = 'laying';
+  layingT0 = performance.now();
+  updateHint();
+}
+
+function setupLayersOnBook() {
+  const w = focused.userData.w, h = focused.userData.h, t = focused.userData.t;
+  // page stack thickness == book spine thickness
+  currentCoverDz = t * 0.10;
+  currentPageDz  = (t - currentCoverDz) / PAGE_COUNT;
+
+  // page stack occupies the book BODY's y range (not floating above it)
+  baseTopY = 1.0 - t/2 + 0.001;        // bottom of stack just above book bottom
+  leftTopY = baseTopY - 0.0005;
+
+  underlay.visible = false;
+  openBase.visible = false;
+  focused.visible = false;
+
+  // visible spine binding at the hinge line
+  const spineThickness = Math.max(0.018, t * 0.18);
+  spine.scale.set(spineThickness, t * 0.99, h * 1.005);
+  spine.position.set(-w/2 - spineThickness/2, 1.0, 2.7);
+  spineMat.color.setHex(focused.userData.spineHex);
+  spine.visible = true;
+
+  // right stack: layer[0] = cover on top; layer[1..PAGE_COUNT] = pages descending.
+  for (let i = 0; i < N_LAYERS; i++) {
+    const layer = layers[i];
+    layer.scale.set(w, 1, h);
+    let y;
+    if (i === 0) {
+      y = baseTopY + (PAGE_COUNT - 1) * currentPageDz + currentCoverDz;
+    } else {
+      y = baseTopY + (PAGE_COUNT - i) * currentPageDz;
+    }
+    layer.position.set(-w/2, y, 2.7);
+    layer.rotation.z = 0;
+    layer.material.uniforms.uTurn.value = 0;
+    layer.userData.side = 'right';
+    layer.visible = true;
+    if (i === 0) {
+      layer.material.uniforms.uFront.value.setHex(focused.userData.coverHex);
+      layer.material.uniforms.uBack.value.setHex(0xf0ede5);
+    } else {
+      layer.material.uniforms.uFront.value.setHex(0xf6f3eb);
+      layer.material.uniforms.uBack.value.setHex(0xece9e1);
+    }
+  }
+}
+
+function startCoverFlip() {
+  setupLayersOnBook();
+  // rigid rotation around the spine hinge. mesh.y stays fixed throughout — the cover's
+  // spine edge is the rotation axis and must NOT move during the animation.
+  const cover = layers[0];
+  cover.userData.animStartRotZ = 0;
+  cover.userData.animEndRotZ   = Math.PI;
+  state = 'opening';
+  turningLayerIdx = 0;
+  turnT0 = performance.now();
+  updateHint();
+}
+
+function tryStartTurn() {
+  if (state !== 'open') return;
+  let target = -1, maxY = -Infinity;
+  for (let i = 0; i < N_LAYERS; i++) {
+    if (layers[i].userData.side === 'right' && layers[i].position.y > maxY) {
+      maxY = layers[i].position.y; target = i;
+    }
+  }
+  if (target === -1) return;
+  const layer = layers[target];
+  const dz = layer.userData.isCover ? currentCoverDz : currentPageDz;
+  if (layer.userData.isCover) {
+    // rigid rotation for the cover; mesh.y stays fixed (hinge doesn't move)
+    layer.userData.animStartRotZ = 0;
+    layer.userData.animEndRotZ   = Math.PI;
+  } else {
+    // curl shader for pages; mesh.y compensates so rendered y (= mesh.y + 2R) lands on left
+    layer.userData.animStartUTurn = 0;
+    layer.userData.animEndUTurn   = 1;
+    layer.userData.animStartY = layer.position.y;
+    layer.userData.animEndY   = (leftTopY + dz) - 2 * PAGE_R;
+  }
+  state = 'turning';
+  turningLayerIdx = target;
+  turnT0 = performance.now();
+  updateHint();
+}
+
+function finishTurn() {
+  const layer = layers[turningLayerIdx];
+  if (layer.userData.animEndY !== undefined) {
+    layer.position.y = layer.userData.animEndY;
+  }
+  if (layer.userData.isCover) {
+    layer.rotation.z = Math.PI;
+    leftTopY = layer.position.y;        // rendered y == mesh.y for rigid cover
+  } else {
+    layer.material.uniforms.uTurn.value = 1;
+    leftTopY = layer.position.y + 2 * PAGE_R;   // rendered y == mesh.y + 2R for curled page
+  }
+  layer.userData.side = 'left';
+
+  delete layer.userData.animStartY;
+  delete layer.userData.animEndY;
+  delete layer.userData.animStartRotZ;
+  delete layer.userData.animEndRotZ;
+  delete layer.userData.animStartUTurn;
+  delete layer.userData.animEndUTurn;
+
+  state = 'open';
+  updateHint();
+}
+
+function _clearCoverLerp() {
+  delete layers[0].userData.animStartY;
+  delete layers[0].userData.animEndY;
+  delete layers[0].userData.animStartRotZ;
+  delete layers[0].userData.animEndRotZ;
+  delete layers[0].userData.animStartUTurn;
+  delete layers[0].userData.animEndUTurn;
+}
+
+function tryReverseTurn() {
+  if (state !== 'open') return;
+  // topmost left-side PAGE (skip cover at index 0). For curled pages, rendered y = mesh.y + 2R.
+  let target = -1, maxRendered = -Infinity;
+  for (let i = 1; i < N_LAYERS; i++) {
+    if (layers[i].userData.side === 'left') {
+      const r = layers[i].position.y + 2 * PAGE_R;
+      if (r > maxRendered) { maxRendered = r; target = i; }
+    }
+  }
+  if (target === -1) return;
+  const layer = layers[target];
+  // find current top of right stack
+  let topRightY = baseTopY - 0.0005;
+  for (let i = 0; i < N_LAYERS; i++) {
+    if (layers[i].userData.side === 'right' && i !== target && layers[i].position.y > topRightY) {
+      topRightY = layers[i].position.y;
+    }
+  }
+  layer.userData.animStartUTurn = 1;
+  layer.userData.animEndUTurn   = 0;
+  // mesh.y goes from current (offset by -2R from rendered) back to a flat right-stack y
+  layer.userData.animStartY = layer.position.y;
+  layer.userData.animEndY   = topRightY + currentPageDz;
+  state = 'reversing';
+  turningLayerIdx = target;
+  turnT0 = performance.now();
+  updateHint();
+}
+
+function finishReverseTurn() {
+  const layer = layers[turningLayerIdx];
+  layer.material.uniforms.uTurn.value = 0;
+  layer.position.y = layer.userData.animEndY;
+  layer.userData.side = 'right';
+
+  // recompute leftTopY from remaining left layers' rendered y
+  let newLeftTop = baseTopY - 0.0005;
+  for (const l of layers) {
+    if (l.userData.side === 'left') {
+      const r = l.userData.isCover ? l.position.y : l.position.y + 2 * PAGE_R;
+      if (r > newLeftTop) newLeftTop = r;
+    }
+  }
+  leftTopY = newLeftTop;
+
+  delete layer.userData.animStartY;
+  delete layer.userData.animEndY;
+  delete layer.userData.animStartUTurn;
+  delete layer.userData.animEndUTurn;
+
+  state = 'open';
+  updateHint();
+}
+
+function startClosing() {
+  // snap any flipped pages back to right
+  for (let i = 1; i < N_LAYERS; i++) {
+    if (layers[i].userData.side === 'left') {
+      layers[i].material.uniforms.uTurn.value = 0;
+      layers[i].userData.side = 'right';
+    }
+  }
+  // re-stack the right side (cover positioned separately below)
+  let y = baseTopY;
+  for (let i = N_LAYERS - 1; i >= 1; i--) {
+    layers[i].position.y = y;
+    y += currentPageDz;
+  }
+  // cover rigid-rotates from π back to 0; mesh.y stays fixed (hinge doesn't move)
+  const cover = layers[0];
+  cover.userData.animStartRotZ = Math.PI;
+  cover.userData.animEndRotZ   = 0;
+  state = 'closing';
+  turningLayerIdx = 0;
+  turnT0 = performance.now();
+  updateHint();
+}
+
+function finishClosing() {
+  layers[0].rotation.z = 0;
+  layers[0].userData.side = 'right';
+  _clearCoverLerp();
+  // hand off to closeAndReturn (hides layers + returns book to stack)
+  closeAndReturn();
+}
+
+function hideLayers() {
+  for (const l of layers) {
+    l.visible = false;
+    l.rotation.z = 0;
+    l.material.uniforms.uTurn.value = 0;
+    l.userData.side = 'right';
+  }
+  underlay.visible = false;
+  openBase.visible = false;
+  spine.visible = false;
+}
+
+function startMacbookOpen(mb) {
+  if (focused && focused !== mb) { focused.visible = true; stack.push(focused); }
+  focused = mb;
+  mb.visible = true;
+  const i = stack.indexOf(mb);
+  if (i >= 0) stack.splice(i, 1);
+  layoutStack();
+
+  // lay flat in front of camera, identity rotation
+  mb.userData.targetPos  = new THREE.Vector3(0, 1.0, 2.8);
+  mb.userData.targetQuat = new THREE.Quaternion();
+  mb.userData.targetOpacity = 1.0;
+  for (const b of stack) b.userData.targetOpacity = 1.0;
+
+  hideLayers();
+  setCamGoal(MACBOOK_VIEW);
+
+  // reset hinge & scroll, then start animation
+  mb.userData.hinge.rotation.x = 0;
+  const tex = mb.userData.screenContent.tex;
+  tex.offset.y = 1 - tex.repeat.y;
+  tex.needsUpdate = true;
+
+  state = 'macbook-opening';
+  macbookT0 = performance.now();
+  updateHint();
+}
+
+function closeAndReturn() {
+  if (state === 'stack') return;
+  hideLayers();
+  clearAllAnnotations();
+  lastAnnotated = null;
+  // reset any open macbook
+  for (const b of books) {
+    if (b.userData.type === 'macbook') {
+      b.userData.hinge.rotation.x = 0;
+      const tex = b.userData.screenContent.tex;
+      tex.offset.y = 1 - tex.repeat.y;
+      tex.needsUpdate = true;
+    }
+  }
+  if (focused) {
+    focused.visible = true;
+    stack.push(focused);
+    focused = null;
+    layoutStack();
+  }
+  for (const b of books) b.userData.targetOpacity = 1.0;
+  setCamGoal(STACK_VIEW);
+  state = 'stack';
+  updateHint();
+}
+
+function updateHint() {}
+
+// ---------- input ----------
+const raycaster = new THREE.Raycaster();
+const pointer   = new THREE.Vector2();
+let hovered = null, dragging = false, dragMoved = false, lx = 0, ly = 0;
+let annotationLayer = null, annotationLastUV = null, strokeStarted = false;
+let lastAnnotated = null;
+
+function pickFirst(ev) {
+  pointer.x = (ev.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(ev.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  // Only raycast visible objects. Three.js's default intersectObjects ignores
+  // visibility, which would let an invisible focused book intercept clicks
+  // meant for the page layers on top of it.
+  const targets = [];
+  for (const b of books) if (b.visible) targets.push(b);
+  for (const l of layers) if (l.visible) targets.push(l);
+  const hit = raycaster.intersectObjects(targets, true)[0];
+  if (!hit) return null;
+  const ref = hit.object.userData?.bookRef;
+  if (ref && ref !== hit.object) hit.object = ref;
+  return hit;
+}
+
+function handleClick(obj) {
+  if (state === 'laying' || state === 'opening' || state === 'turning' ||
+      state === 'reversing' || state === 'closing' || state === 'macbook-opening') return;
+
+  if (state === 'stack') {
+    if (obj && books.includes(obj)) {
+      if (obj.userData.type === 'macbook') startMacbookOpen(obj);
+      else focusBook(obj);
+    }
+  } else if (state === 'focused') {
+    if (obj === focused) {
+      if (focused.userData.type === 'book') startOpening();
+      // ipad/phone in focused: no further action; user uses Esc to return
+    } else if (obj && books.includes(obj)) {
+      if (obj.userData.type === 'macbook') { closeAndReturn(); startMacbookOpen(obj); }
+      else focusBook(obj);
+    } else {
+      closeAndReturn();
+    }
+  } else if (state === 'open') {
+    if (obj && layers.includes(obj)) {
+      if (obj.userData.side === 'right') {
+        tryStartTurn();
+      } else if (obj.userData.layerIdx === 0) {
+        // back of front cover (endpaper) clicked → close the book
+        startClosing();
+      } else {
+        // left-side page → reverse to previous
+        tryReverseTurn();
+      }
+    } else if (obj && books.includes(obj) && obj !== focused) {
+      if (obj.userData.type === 'macbook') { closeAndReturn(); startMacbookOpen(obj); }
+      else { closeAndReturn(); focusBook(obj); }
+    } else if (!obj) {
+      closeAndReturn();
+    }
+  } else if (state === 'macbook-open') {
+    // any click outside switches: another book/device or empty → return
+    if (obj && books.includes(obj) && obj !== focused) {
+      if (obj.userData.type === 'macbook') { /* already same kind: ignore */ }
+      else { closeAndReturn(); focusBook(obj); }
+    } else if (!obj) {
+      closeAndReturn();
+    }
+  }
+}
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  dragging = true; dragMoved = false; lx = e.clientX; ly = e.clientY;
+  annotationLayer = null; annotationLastUV = null; strokeStarted = false;
+  if (state === 'open' || state === 'opening' || state === 'turning' || state === 'reversing' || state === 'closing') {
+    const hit = pickFirst(e);
+    if (hit && layers.includes(hit.object)) {
+      annotationLayer  = hit.object;
+      annotationLastUV = hit.uv.clone();
+    }
+  }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (dragging) {
+    const dx = e.clientX - lx, dy = e.clientY - ly;
+    if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved = true;
+    if (dragMoved && annotationLayer) {
+      const hit = pickFirst(e);
+      if (hit && hit.object === annotationLayer) {
+        if (!strokeStarted) {
+          pushUndoState(annotationLayer.userData.annotation);
+          strokeStarted = true;
+          lastAnnotated = annotationLayer;
+        }
+        drawStroke(annotationLayer.userData.annotation, annotationLastUV, hit.uv);
+        annotationLastUV = hit.uv.clone();
+      }
+    } else if (!annotationLayer) {
+      camTheta -= dx * 0.005;
+      camPhi   -= dy * 0.005;
+      camPhi = Math.max(0.2, Math.min(Math.PI/2 - 0.05, camPhi));
+      camGoal.theta = camTheta; camGoal.phi = camPhi;
+      applyCam();
+    }
+    lx = e.clientX; ly = e.clientY;
+  } else {
+    const hit = pickFirst(e);
+    const obj = hit?.object || null;
+    if (obj !== hovered) {
+      hovered = obj;
+      const onLayer = obj && layers.includes(obj) && (state === 'open' || state === 'opening' || state === 'turning' || state === 'reversing' || state === 'closing');
+      document.body.classList.toggle('drawable', !!onLayer);
+      document.body.classList.toggle('hovering', !!obj && !onLayer);
+    }
+  }
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  if (e.button === 0 && dragging && !dragMoved) handleClick(pickFirst(e)?.object || null);
+  dragging = false;
+  annotationLayer = null;
+  annotationLastUV = null;
+});
+renderer.domElement.addEventListener('contextmenu', e => { e.preventDefault(); closeAndReturn(); });
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeAndReturn(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+    if (lastAnnotated) {
+      const ok = popUndoState(lastAnnotated.userData.annotation);
+      if (ok && lastAnnotated.userData.annotation.history.length === 0) lastAnnotated = null;
+    }
+    e.preventDefault();
+  }
+});
+addEventListener('wheel', e => {
+  // scroll the macbook screen instead of zooming
+  if (state === 'macbook-open' && focused?.userData.type === 'macbook') {
+    const tex = focused.userData.screenContent.tex;
+    const r = tex.repeat.y;
+    tex.offset.y = Math.max(0, Math.min(1 - r, tex.offset.y - e.deltaY * 0.0006));
+    tex.needsUpdate = true;
+    return;
+  }
+  camRadius *= 1 + e.deltaY * 0.001;
+  const minR = (state === 'open' || state === 'opening' || state === 'turning' || state === 'reversing' || state === 'closing') ? 0.6 : 2.0;
+  camRadius = Math.max(minR, Math.min(15, camRadius));
+  camGoal.radius = camRadius;
+  applyCam();
+}, { passive: true });
+
+// ---------- animate ----------
+function easeInOut(x) { return x < 0.5 ? 2*x*x : 1 - Math.pow(-2*x + 2, 2)/2; }
+
+function animate() {
+  requestAnimationFrame(animate);
+  const k = 0.14;
+
+  if (state === 'laying' && (performance.now() - layingT0) / 1000 > LAYING_DURATION) {
+    startCoverFlip();
+  }
+  // hybrid animation: cover uses rigid rotation.z, pages use curl uTurn. position.y lerps in parallel.
+  if (state === 'opening' || state === 'turning' || state === 'reversing' || state === 'closing') {
+    let dur;
+    if (state === 'opening' || state === 'closing') dur = COVER_DURATION;
+    else dur = TURN_DURATION;
+    const t = Math.min((performance.now() - turnT0) / 1000 / dur, 1);
+    const e = easeInOut(t);
+    const layer = layers[turningLayerIdx];
+    if (layer.userData.animStartRotZ !== undefined) {
+      layer.rotation.z = layer.userData.animStartRotZ + (layer.userData.animEndRotZ - layer.userData.animStartRotZ) * e;
+    }
+    if (layer.userData.animStartUTurn !== undefined) {
+      layer.material.uniforms.uTurn.value = layer.userData.animStartUTurn + (layer.userData.animEndUTurn - layer.userData.animStartUTurn) * e;
+    }
+    if (layer.userData.animStartY !== undefined) {
+      layer.position.y = layer.userData.animStartY + (layer.userData.animEndY - layer.userData.animStartY) * e;
+    }
+    if (t >= 1) {
+      if (state === 'opening' || state === 'turning') finishTurn();
+      else if (state === 'reversing') finishReverseTurn();
+      else if (state === 'closing') finishClosing();
+    }
+  }
+
+  if (state === 'macbook-opening' && focused) {
+    const t = Math.min((performance.now() - macbookT0) / 1000 / MACBOOK_DURATION, 1);
+    focused.userData.hinge.rotation.x = MACBOOK_OPEN_ANGLE * easeInOut(t);
+    if (t >= 1) { state = 'macbook-open'; updateHint(); }
+  }
+
+  if (camLerping) {
+    camTheta  += (camGoal.theta  - camTheta)  * k;
+    camPhi    += (camGoal.phi    - camPhi)    * k;
+    camRadius += (camGoal.radius - camRadius) * k;
+    camTarget.lerp(camGoal.target, k);
+    applyCam();
+    if (Math.abs(camGoal.theta - camTheta) < 0.001 &&
+        Math.abs(camGoal.phi - camPhi)   < 0.001 &&
+        Math.abs(camGoal.radius - camRadius) < 0.005) camLerping = false;
+  }
+
+  for (const b of books) {
+    b.position.lerp(b.userData.targetPos, k);
+    b.quaternion.slerp(b.userData.targetQuat, k);
+    const op = b.userData.targetOpacity;
+    for (const m of b.userData.uniqueMats) {
+      m.opacity += (op - m.opacity) * k;
+      m.depthWrite = m.opacity > 0.5;
+    }
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
 </html>
