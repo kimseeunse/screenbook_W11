@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Page Turn Prototype</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: system-ui, sans-serif; color: #eee; }
+  #panel {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(0,0,0,0.5); padding: 12px 16px; border-radius: 6px;
+    font-size: 13px; line-height: 1.7;
+  }
+  #panel label { display: block; }
+  input[type=range] { width: 260px; vertical-align: middle; }
+  button { margin-top: 8px; padding: 6px 12px; background: #444; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #555; }
+  .val { display: inline-block; min-width: 40px; color: #9cf; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <label>Turn <input type="range" id="turn" min="0" max="1" step="0.001" value="0"> <span class="val" id="turnVal">0.00</span></label>
+  <label>Radius (R) <input type="range" id="radius" min="0.01" max="0.3" step="0.005" value="0.06"> <span class="val" id="radVal">0.06</span></label>
+  <label>Segments <input type="range" id="seg" min="10" max="200" step="2" value="80"> <span class="val" id="segVal">80</span></label>
+  <button id="play">▶ Play turn</button>
+  <div style="margin-top:8px;opacity:.6">drag: orbit · wheel: zoom</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+const key = new THREE.DirectionalLight(0xffffff, 0.9);
+key.position.set(2, 4, 3);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xaaccff, 0.3);
+fill.position.set(-3, 2, -2);
+scene.add(fill);
+
+const W = 2.0;   // page width
+const H = 1.4;   // page height (z direction after rotation)
+
+// Backdrop pages so we can see "above/below" relationship
+function makeBgPage(cx, color) {
+  const g = new THREE.PlaneGeometry(W, H);
+  g.rotateX(-Math.PI/2);
+  g.translate(cx, -0.002, 0);
+  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: 0.95 }));
+}
+scene.add(makeBgPage(-W/2, 0xf2ece0));   // left page
+scene.add(makeBgPage( W/2, 0xf2ece0));   // right page
+
+// Turning page geometry (rebuilt when segments change)
+let pageMesh = null;
+function buildPage(segX) {
+  if (pageMesh) {
+    scene.remove(pageMesh);
+    pageMesh.geometry.dispose();
+  }
+  const geo = new THREE.PlaneGeometry(W, H, segX, 4);
+  geo.rotateX(-Math.PI/2);
+  geo.translate(W/2, 0, 0);  // spine at x=0, outer edge at x=W
+  pageMesh = new THREE.Mesh(geo, pageMat);
+  scene.add(pageMesh);
+}
+
+const pageMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: {
+    uTurn:   { value: 0 },
+    uW:      { value: W },
+    uR:      { value: 0.06 },
+    uFront:  { value: new THREE.Color(0xffffff) },
+    uBack:   { value: new THREE.Color(0xe8d8b8) },
+  },
+  vertexShader: /* glsl */`
+    uniform float uTurn;
+    uniform float uW;
+    uniform float uR;
+
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying float vRegion; // 0=flat 1=wrap 2=flipped (for debug)
+
+    const float PI = 3.14159265359;
+
+    void main() {
+      vec3 pos = position;
+      float F = uW * (1.0 - uTurn);
+      float s = pos.x - F;
+
+      vec3 n;
+      if (s <= 0.0) {
+        // (1) untouched: still flat on the table
+        n = vec3(0.0, 1.0, 0.0);
+        vRegion = 0.0;
+      } else if (s <= PI * uR) {
+        // (2) wrapping around the cylinder
+        float th = s / uR;
+        pos.x = F + uR * sin(th);
+        pos.y = uR * (1.0 - cos(th));
+        n = vec3(-sin(th), cos(th), 0.0);
+        vRegion = 1.0;
+      } else {
+        // (3) flipped flat: lying inverted on top, extending leftward
+        pos.x = 2.0 * F - position.x + PI * uR;
+        pos.y = 2.0 * uR;
+        n = vec3(0.0, -1.0, 0.0);
+        vRegion = 2.0;
+      }
+
+      vUv = uv;
+      vNormal = normalize((modelMatrix * vec4(n, 0.0)).xyz);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform vec3 uFront;
+    uniform vec3 uBack;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+
+    void main() {
+      vec3 n = normalize(vNormal);
+      if (!gl_FrontFacing) n = -n;
+
+      vec3 lightDir = normalize(vec3(0.4, 1.0, 0.5));
+      float diff = max(dot(n, lightDir), 0.0);
+      float amb  = 0.35;
+
+      vec3 base = gl_FrontFacing ? uFront : uBack;
+
+      // grid overlay so you can read the deformation
+      vec2 g = abs(fract(vUv * vec2(12.0, 8.0)) - 0.5);
+      float line = step(0.46, max(g.x, g.y));
+      base = mix(base, vec3(0.15, 0.2, 0.3), line * 0.25);
+
+      // page edge highlight (helps reading the curl visually)
+      float edge = smoothstep(0.0, 0.02, vUv.x) * smoothstep(0.0, 0.02, 1.0 - vUv.x);
+
+      gl_FragColor = vec4(base * (amb + diff * 0.9), 1.0);
+    }
+  `,
+});
+
+buildPage(80);
+
+// Camera + orbit controls (hand-rolled, minimal)
+let radius = 3.0, theta = 0.0, phi = 0.9;
+function updateCamera() {
+  camera.position.set(
+    radius * Math.sin(phi) * Math.sin(theta),
+    radius * Math.cos(phi),
+    radius * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(0, 0, 0);
+}
+updateCamera();
+
+let dragging = false, lx = 0, ly = 0;
+renderer.domElement.addEventListener('mousedown', e => { dragging = true; lx = e.clientX; ly = e.clientY; });
+addEventListener('mouseup',   () => dragging = false);
+addEventListener('mousemove', e => {
+  if (!dragging) return;
+  theta -= (e.clientX - lx) * 0.005;
+  phi   -= (e.clientY - ly) * 0.005;
+  phi = Math.max(0.15, Math.min(Math.PI - 0.15, phi));
+  lx = e.clientX; ly = e.clientY;
+  updateCamera();
+});
+addEventListener('wheel', e => {
+  radius *= (1 + e.deltaY * 0.001);
+  radius = Math.max(1.2, Math.min(8, radius));
+  updateCamera();
+}, { passive: true });
+
+// UI
+const turn = document.getElementById('turn');
+const rad  = document.getElementById('radius');
+const seg  = document.getElementById('seg');
+const turnVal = document.getElementById('turnVal');
+const radVal  = document.getElementById('radVal');
+const segVal  = document.getElementById('segVal');
+
+turn.oninput = e => {
+  pageMat.uniforms.uTurn.value = +e.target.value;
+  turnVal.textContent = (+e.target.value).toFixed(2);
+};
+rad.oninput = e => {
+  pageMat.uniforms.uR.value = +e.target.value;
+  radVal.textContent = (+e.target.value).toFixed(2);
+};
+seg.oninput = e => {
+  buildPage(+e.target.value);
+  segVal.textContent = e.target.value;
+};
+
+let playing = false, t0 = 0;
+document.getElementById('play').onclick = () => { playing = true; t0 = performance.now(); };
+
+function easeInOut(x) { return x < 0.5 ? 2*x*x : 1 - Math.pow(-2*x + 2, 2)/2; }
+
+(function loop() {
+  requestAnimationFrame(loop);
+  if (playing) {
+    const t = Math.min((performance.now() - t0) / 1800, 1);
+    const e = easeInOut(t);
+    pageMat.uniforms.uTurn.value = e;
+    turn.value = e;
+    turnVal.textContent = e.toFixed(2);
+    if (t >= 1) playing = false;
+  }
+  renderer.render(scene, camera);
+})();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
